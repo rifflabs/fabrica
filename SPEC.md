@@ -100,17 +100,18 @@ Fabrica detects language automatically
 
 **Translation Backend:**
 
-Uses Palace Translator to route to cost-effective LLMs. Translation is a perfect use case for smaller models - Mistral/Devstral handles this well at a fraction of Claude's cost.
+Uses OpenRouter to route to cost-effective LLMs. Translation is a perfect use case for smaller models - Mistral/Devstral handles this well at a fraction of Claude's cost.
 
 ```rust
 pub struct TranslationService {
-    palace_url: String,  // http://localhost:19848
-    model: String,       // "mistral" or "devstral"
+    openrouter_url: String,  // https://openrouter.ai/api/v1
+    openrouter_api_key: String, // Your OpenRouter API key
+    model: String,       // "mistral", "devstral", etc.
 }
 
 impl TranslationService {
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> Result<String> {
-        // Route through Palace Translator
+        // Route through OpenRouter
         // Prompt: "Translate the following {from} text to {to}.
         //          Output ONLY the translation, nothing else: {text}"
     }
@@ -430,9 +431,10 @@ guild_id = 987654321  # Riff Labs server
 path = "fabrica.db"
 
 [translation]
-backend = "palace"
-palace_url = "http://localhost:19848"
-model = "mistral"
+backend = "openrouter"  # "palace", "openrouter", or "direct"
+openrouter_url = "https://openrouter.ai/api/v1"
+openrouter_api_key = "${OPENROUTER_API_KEY}"
+model = "mistral"  # Model to use for translation
 default_language = "en"
 supported_languages = ["en", "hi", "fr"]  # English, Hindi, French
 

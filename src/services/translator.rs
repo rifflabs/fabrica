@@ -53,7 +53,7 @@ impl TranslatorService {
     /// Translate text from one language to another
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> Result<String> {
         match self.config.backend.as_str() {
-            "palace" => self.translate_via_palace(text, from, to).await,
+            "openrouter" => self.translate_via_openrouter(text, from, to).await,
             "direct" => self.translate_direct(text, from, to).await,
             other => {
                 warn!("Unknown translation backend: {}, falling back to direct", other);
@@ -62,8 +62,8 @@ impl TranslatorService {
         }
     }
 
-    /// Translate using Palace Translator (routes to Mistral/Devstral)
-    async fn translate_via_palace(&self, text: &str, from: &str, to: &str) -> Result<String> {
+    /// Translate using OpenRouter API
+    async fn translate_via_openrouter(&self, text: &str, from: &str, to: &str) -> Result<String> {
         let from_name = language_name(from);
         let to_name = language_name(to);
 
@@ -74,7 +74,14 @@ impl TranslatorService {
             from_name, to_name, text
         );
 
-        let request = PalaceRequest {
+        #[derive(Serialize)]
+        struct OpenRouterRequest {
+            model: String,
+            messages: Vec<Message>,
+            max_tokens: u32,
+        }
+
+        let request = OpenRouterRequest {
             model: self.config.model.clone(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -83,28 +90,30 @@ impl TranslatorService {
             max_tokens: 2048,
         };
 
-        let url = format!("{}/v1/chat/completions", self.config.palace_url);
+        let url = format!("{}/chat/completions", self.config.openrouter_url);
 
-        debug!("Translating via Palace: {} -> {}", from, to);
+        debug!("Translating via OpenRouter: {} -> {}", from, to);
 
         let response = self
             .client
             .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.openrouter_api_key))
+            .header("Content-Type", "application/json")
             .json(&request)
             .send()
             .await
-            .context("Failed to send translation request")?;
+            .context("Failed to send OpenRouter translation request")?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("Translation request failed: {} - {}", status, body);
+            anyhow::bail!("OpenRouter translation request failed: {} - {}", status, body);
         }
 
         let result: PalaceResponse = response
             .json()
             .await
-            .context("Failed to parse translation response")?;
+            .context("Failed to parse OpenRouter translation response")?;
 
         let translation = result
             .choices
@@ -113,7 +122,7 @@ impl TranslatorService {
             .unwrap_or_default();
 
         if translation.is_empty() {
-            anyhow::bail!("Empty translation response");
+            anyhow::bail!("Empty translation response from OpenRouter");
         }
 
         Ok(translation)

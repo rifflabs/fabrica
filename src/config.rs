@@ -39,6 +39,10 @@ pub struct TranslationConfig {
     pub backend: String,
     #[serde(default = "default_palace_url")]
     pub palace_url: String,
+    #[serde(default = "default_openrouter_url")]
+    pub openrouter_url: String,
+    #[serde(default = "default_openrouter_api_key")]
+    pub openrouter_api_key: String,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default = "default_language")]
@@ -53,6 +57,14 @@ fn default_backend() -> String {
 
 fn default_palace_url() -> String {
     "http://localhost:19848".to_string()
+}
+
+fn default_openrouter_url() -> String {
+    "https://openrouter.ai/api/v1".to_string()
+}
+
+fn default_openrouter_api_key() -> String {
+    "".to_string()
 }
 
 fn default_model() -> String {
@@ -154,6 +166,8 @@ impl Config {
             translation: TranslationConfig {
                 backend: std::env::var("TRANSLATION_BACKEND").unwrap_or_else(|_| default_backend()),
                 palace_url: std::env::var("PALACE_URL").unwrap_or_else(|_| default_palace_url()),
+                openrouter_url: std::env::var("OPENROUTER_URL").unwrap_or_else(|_| default_openrouter_url()),
+                openrouter_api_key: std::env::var("OPENROUTER_API_KEY").unwrap_or_else(|_| default_openrouter_api_key()),
                 model: std::env::var("TRANSLATION_MODEL").unwrap_or_else(|_| default_model()),
                 default_language: default_language(),
                 supported_languages: default_languages(),

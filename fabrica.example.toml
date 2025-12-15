@@ -11,8 +11,9 @@ guild_id = 0        # Optional: Riff Labs server ID for faster command registrat
 path = "fabrica.db"
 
 [translation]
-backend = "palace"  # "palace" for LLM-based, "direct" for API-based
-palace_url = "http://localhost:19848"  # Palace Translator URL
+backend = "openrouter"  # "palace", "openrouter", or "direct"
+openrouter_url = "https://openrouter.ai/api/v1"
+openrouter_api_key = "${OPENROUTER_API_KEY}"
 model = "mistral"   # Model to use for translation
 default_language = "en"
 supported_languages = ["en", "hi", "fr"]
