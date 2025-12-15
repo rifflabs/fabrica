@@ -19,6 +19,12 @@ mod webhooks;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env file if it exists
+    if std::path::Path::new(".env").exists() {
+        dotenvy::dotenv()?;
+        info!("Loaded environment variables from .env file");
+    }
+
     // Initialize logging
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
