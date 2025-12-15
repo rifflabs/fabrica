@@ -36,6 +36,10 @@ async fn main() -> Result<()> {
     // Load configuration
     let config = config::Config::load()?;
     info!("Configuration loaded");
+    info!("OpenRouter URL: {}", config.translation.openrouter_url);
+    info!("OpenRouter API key: {}", if config.translation.openrouter_api_key.is_empty() { "EMPTY" } else { "SET" });
+    info!("Translation model: {}", config.translation.model);
+    info!("Translation backend: {}", config.translation.backend);
 
     // Initialize database
     let db = db::Database::new(&config.database.path).await?;

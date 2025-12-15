@@ -19,8 +19,12 @@ pub struct Config {
 pub struct DiscordConfig {
     pub token: String,
     pub application_id: u64,
+    /// List of guild IDs where the bot is allowed to operate
     #[serde(default)]
-    pub guild_id: Option<u64>,
+    pub guild_ids: Vec<String>,
+    /// Global admin user IDs who bypass all permission checks
+    #[serde(default)]
+    pub admin_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -156,9 +160,12 @@ impl Config {
                     .unwrap_or_else(|_| "0".to_string())
                     .parse()
                     .unwrap_or(0),
-                guild_id: std::env::var("DISCORD_GUILD_ID")
-                    .ok()
-                    .and_then(|s| s.parse().ok()),
+                guild_ids: std::env::var("DISCORD_GUILD_IDS")
+                    .map(|s| s.split(',').map(|id| id.trim().to_string()).collect())
+                    .unwrap_or_default(),
+                admin_ids: std::env::var("DISCORD_ADMIN_IDS")
+                    .map(|s| s.split(',').map(|id| id.trim().to_string()).collect())
+                    .unwrap_or_default(),
             },
             database: DatabaseConfig {
                 path: std::env::var("DATABASE_PATH").unwrap_or_else(|_| default_db_path()),
@@ -197,6 +204,7 @@ impl Config {
     fn expand_env_vars(&mut self) {
         self.discord.token = expand_env(&self.discord.token);
         self.plane.api_key = expand_env(&self.plane.api_key);
+        self.translation.openrouter_api_key = expand_env(&self.translation.openrouter_api_key);
         if let Some(ref mut token) = self.github.token {
             *token = expand_env(token);
         }

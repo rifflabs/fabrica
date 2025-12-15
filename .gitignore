@@ -1,1 +1,5 @@
 synthesis/
+fabrica.toml
+.env
+target/
+*.db

@@ -83,6 +83,37 @@ pub struct TranslationSubscription {
     pub created_at: i64,
 }
 
+/// User settings record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSettings {
+    pub discord_id: String,
+    pub timezone: String,
+    pub time_format: String,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            discord_id: String::new(),
+            timezone: "UTC".to_string(),
+            time_format: "24h".to_string(),
+        }
+    }
+}
+
+impl UserSettings {
+    pub fn new(discord_id: impl Into<String>) -> Self {
+        Self {
+            discord_id: discord_id.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn is_12h(&self) -> bool {
+        self.time_format == "12h"
+    }
+}
+
 /// Watch level for notifications
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
