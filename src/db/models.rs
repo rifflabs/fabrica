@@ -89,6 +89,7 @@ pub struct UserSettings {
     pub discord_id: String,
     pub timezone: String,
     pub time_format: String,
+    pub always_show_me: bool,
 }
 
 impl Default for UserSettings {
@@ -97,6 +98,7 @@ impl Default for UserSettings {
             discord_id: String::new(),
             timezone: "UTC".to_string(),
             time_format: "24h".to_string(),
+            always_show_me: false,
         }
     }
 }

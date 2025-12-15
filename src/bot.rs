@@ -117,8 +117,20 @@ async fn event_handler(
                 return Ok(());
             }
 
-            // Handle translation
-            translation::handle_message(ctx, new_message, data).await?;
+            // Spawn translation as a separate task for concurrent processing
+            // This allows multiple messages to be processed simultaneously
+            let ctx = ctx.clone();
+            let message = new_message.clone();
+            let data_clone = Data {
+                config: data.config.clone(),
+                db: data.db.clone(),
+            };
+
+            tokio::spawn(async move {
+                if let Err(e) = translation::handle_message(&ctx, &message, &data_clone).await {
+                    error!("Translation error for message {}: {}", message.id, e);
+                }
+            });
         }
         serenity::FullEvent::Ready { data_about_bot } => {
             info!("Bot ready as {}", data_about_bot.user.name);
@@ -164,7 +176,7 @@ pub async fn fabrica(ctx: Context<'_>) -> Result<(), Error> {
 // ==================== Translation Commands ====================
 
 /// Translation commands
-#[poise::command(slash_command, prefix_command, subcommands("subscribe", "unsubscribe", "status_sub", "mode_set", "mode_show", "debug_mode", "last_cmd"), rename = "translate")]
+#[poise::command(slash_command, prefix_command, subcommands("subscribe", "unsubscribe", "status_sub", "mode_set", "mode_show", "debug_mode", "last_cmd", "dialect_set", "dialect_show", "dialect_clear", "default_set"), rename = "translate")]
 pub async fn translate_cmd(_ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
@@ -180,8 +192,9 @@ pub async fn server_cmd(_ctx: Context<'_>) -> Result<(), Error> {
 pub async fn last_fabrica(
     ctx: Context<'_>,
     #[description = "Number of messages to show (max 100)"] count: Option<u32>,
+    #[description = "Target language (e.g., 'filipino', 'hindi')"] language: Option<String>,
 ) -> Result<(), Error> {
-    translation::last(ctx, count).await
+    translation::last(ctx, count, language).await
 }
 
 /// Show server translation status
@@ -462,8 +475,46 @@ pub async fn debug_mode(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn last_cmd(
     ctx: Context<'_>,
     #[description = "Number of messages to show (max 100)"] count: Option<u32>,
+    #[description = "Target language (e.g., 'filipino', 'hindi')"] language: Option<String>,
 ) -> Result<(), Error> {
-    translation::last(ctx, count).await
+    translation::last(ctx, count, language).await
+}
+
+/// Set your preferred dialect for a language (e.g., Bisaya for Filipino)
+#[poise::command(slash_command, prefix_command, rename = "dialect")]
+pub async fn dialect_set(
+    ctx: Context<'_>,
+    #[description = "Language (e.g., filipino, chinese, spanish)"] language: String,
+    #[description = "Dialect (e.g., bisaya, cantonese, mexican)"] dialect: String,
+) -> Result<(), Error> {
+    translation::set_dialect(ctx, language, dialect).await
+}
+
+/// Show your dialect preferences
+#[poise::command(slash_command, prefix_command, rename = "dialects")]
+pub async fn dialect_show(ctx: Context<'_>) -> Result<(), Error> {
+    translation::show_dialects(ctx).await
+}
+
+/// Clear your dialect preference for a language
+#[poise::command(slash_command, prefix_command, rename = "dialect-clear")]
+pub async fn dialect_clear(
+    ctx: Context<'_>,
+    #[description = "Language to clear dialect for"] language: String,
+) -> Result<(), Error> {
+    translation::clear_dialect(ctx, language).await
+}
+
+/// Set your default translation language (used by /fabrica translate last)
+#[poise::command(slash_command, prefix_command, rename = "default")]
+pub async fn default_set(
+    ctx: Context<'_>,
+    #[description = "Default language (e.g., 'en', 'filipino', 'hindi')"] language: Option<String>,
+) -> Result<(), Error> {
+    match language {
+        Some(lang) => translation::set_default(ctx, lang).await,
+        None => translation::show_default(ctx).await,
+    }
 }
 
 // ==================== Status Commands ====================
@@ -520,7 +571,7 @@ pub async fn hours_cmd(
     slash_command,
     prefix_command,
     rename = "settings",
-    subcommands("settings_timezone", "settings_format"),
+    subcommands("settings_timezone", "settings_format", "settings_always_show_me"),
 )]
 pub async fn settings_cmd(ctx: Context<'_>) -> Result<(), Error> {
     status::show_settings(ctx).await
@@ -546,6 +597,12 @@ pub async fn settings_format(
     format: String,
 ) -> Result<(), Error> {
     status::set_time_format(ctx, format).await
+}
+
+/// Toggle always-show-me (stay visible in /team even when busy > 15 min)
+#[poise::command(slash_command, prefix_command, rename = "always-show-me")]
+pub async fn settings_always_show_me(ctx: Context<'_>) -> Result<(), Error> {
+    status::toggle_always_show_me(ctx).await
 }
 
 /// Show who's currently available

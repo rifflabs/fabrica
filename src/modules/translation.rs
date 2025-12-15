@@ -48,14 +48,7 @@ pub async fn handle_message(
     // If whatlang is confident, use its result
     let lang_code = if confidence >= 0.8 {
         // Convert 3-letter to 2-letter code
-        match whatlang_code {
-            "eng" => "en",
-            "hin" => "hi",
-            "fra" => "fr",
-            "spa" => "es",
-            "deu" => "de",
-            other => other,
-        }.to_string()
+        whatlang_to_iso(whatlang_code).to_string()
     } else {
         // Fall back to LLM for uncertain detections
         info!("whatlang uncertain, asking LLM...");
@@ -149,10 +142,12 @@ async fn handle_english_message(
                 return Ok(());
             }
 
-            // Group by language
-            let mut by_language: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            // Group by (language, dialect) - look up each user's dialect preference
+            // Key: (language, Option<dialect>), Value: Vec<discord_id>
+            let mut by_lang_dialect: std::collections::HashMap<(String, Option<String>), Vec<String>> = std::collections::HashMap::new();
             for (discord_id, language) in subscriptions {
-                by_language.entry(language).or_default().push(discord_id);
+                let dialect = data.db.get_dialect_preference(&discord_id, &language).await.ok().flatten();
+                by_lang_dialect.entry((language, dialect)).or_default().push(discord_id);
             }
 
             let channel_name = message
@@ -161,13 +156,18 @@ async fn handle_english_message(
                 .await
                 .unwrap_or_else(|_| "channel".to_string());
 
-            // Translate and DM for each language
-            for (target_lang, subscribers) in by_language {
-                let translated = match translator.translate(&message.content, "en", &target_lang).await {
+            // Translate and DM for each (language, dialect) combination
+            for ((target_lang, dialect), subscribers) in by_lang_dialect {
+                let translated = match translator.translate_with_dialect(
+                    &message.content,
+                    "en",
+                    &target_lang,
+                    dialect.as_deref()
+                ).await {
                     Ok(Some(t)) => t,
                     Ok(None) => continue,
                     Err(e) => {
-                        warn!("Translation to {} failed: {}", target_lang, e);
+                        warn!("Translation to {} (dialect: {:?}) failed: {}", target_lang, dialect, e);
                         continue;
                     }
                 };
@@ -486,6 +486,115 @@ pub async fn debug(ctx: Context<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+/// Set dialect preference for a language
+pub async fn set_dialect(ctx: Context<'_>, language: String, dialect: String) -> Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+
+    // Normalize language code
+    let lang_code = normalize_language(&language);
+    let lang_name = language_name(&lang_code);
+
+    // Store the dialect preference
+    ctx.data().db.set_dialect_preference(&user_id, &lang_code, &dialect).await?;
+
+    info!("User {} set dialect preference: {} -> {}", user_id, lang_code, dialect);
+
+    ctx.send(poise::CreateReply::default()
+        .content(format!(
+            "🗣️ Dialect preference set!\n\
+             **Language:** {}\n\
+             **Dialect:** {}\n\n\
+             When others translate to {} for you, they'll use your preferred dialect.",
+            lang_name, dialect, lang_name
+        ))
+        .ephemeral(true)).await?;
+
+    Ok(())
+}
+
+/// Show current dialect preferences
+pub async fn show_dialects(ctx: Context<'_>) -> Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+    let prefs = ctx.data().db.get_all_dialect_preferences(&user_id).await?;
+
+    if prefs.is_empty() {
+        ctx.send(poise::CreateReply::default()
+            .content("🗣️ You have no dialect preferences set.\n\n\
+                     Use `/fabrica translate dialect <language> <dialect>` to set one.\n\
+                     Examples:\n\
+                     • `/fabrica translate dialect filipino bisaya`\n\
+                     • `/fabrica translate dialect chinese cantonese`\n\
+                     • `/fabrica translate dialect spanish mexican`")
+            .ephemeral(true)).await?;
+    } else {
+        let mut msg = String::from("🗣️ **Your Dialect Preferences**\n\n");
+        for (lang, dialect) in &prefs {
+            msg.push_str(&format!("• **{}**: {}\n", language_name(lang), dialect));
+        }
+        msg.push_str("\nUse `/fabrica translate dialect <language> <dialect>` to change.");
+        ctx.send(poise::CreateReply::default().content(msg).ephemeral(true)).await?;
+    }
+
+    Ok(())
+}
+
+/// Clear dialect preference for a language
+pub async fn clear_dialect(ctx: Context<'_>, language: String) -> Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+    let lang_code = normalize_language(&language);
+    let lang_name = language_name(&lang_code);
+
+    ctx.data().db.clear_dialect_preference(&user_id, &lang_code).await?;
+
+    info!("User {} cleared dialect preference for {}", user_id, lang_code);
+
+    ctx.send(poise::CreateReply::default()
+        .content(format!("🗣️ Cleared dialect preference for **{}**. Default dialect will be used.", lang_name))
+        .ephemeral(true)).await?;
+
+    Ok(())
+}
+
+/// Set default translation language
+pub async fn set_default(ctx: Context<'_>, language: String) -> Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+    let lang_code = normalize_language(&language);
+    let lang_name = language_name(&lang_code);
+
+    ctx.data().db.set_default_language(&user_id, &lang_code).await?;
+
+    info!("User {} set default language to {}", user_id, lang_code);
+
+    ctx.send(poise::CreateReply::default()
+        .content(format!(
+            "🌐 Default language set to **{}**!\n\n\
+             Now `/fabrica translate last` will translate to {} by default.",
+            lang_name, lang_name
+        ))
+        .ephemeral(true)).await?;
+
+    Ok(())
+}
+
+/// Show current default translation language
+pub async fn show_default(ctx: Context<'_>) -> Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+    let default = ctx.data().db.get_default_language(&user_id).await?;
+
+    let msg = if let Some(lang) = default {
+        let lang_name = language_name(&lang);
+        format!("🌐 Your default translation language is **{}**.", lang_name)
+    } else {
+        "🌐 You haven't set a default language yet.\n\n\
+         Use `/fabrica translate default <language>` to set one.\n\
+         Without a default, `/fabrica translate last` uses your first subscription.".to_string()
+    };
+
+    ctx.send(poise::CreateReply::default().content(msg).ephemeral(true)).await?;
+
+    Ok(())
+}
+
 /// Set translation mode for channel
 pub async fn set_mode(ctx: Context<'_>, mode: String) -> Result<(), Error> {
     let guild_id = match get_guild_id(&ctx) {
@@ -623,7 +732,7 @@ async fn has_translation_permission(ctx: &Context<'_>, guild_id: &str, permissio
 }
 
 /// Show recent messages translated to user's subscribed language
-pub async fn last(ctx: Context<'_>, count: Option<u32>) -> Result<(), Error> {
+pub async fn last(ctx: Context<'_>, count: Option<u32>, language: Option<String>) -> Result<(), Error> {
     let guild_id = match get_guild_id(&ctx) {
         Some(gid) => gid,
         None => {
@@ -635,18 +744,29 @@ pub async fn last(ctx: Context<'_>, count: Option<u32>) -> Result<(), Error> {
     let user_id = ctx.author().id.to_string();
     let channel_id = ctx.channel_id().to_string();
 
-    // Get user's subscribed languages
-    let subscriptions = ctx.data().db.get_translation_subscriptions(&guild_id, &user_id, &channel_id).await?;
-    if subscriptions.is_empty() {
-        ctx.say("⚠️ You need to subscribe to a language first with `/fabrica translate subscribe <language>`").await?;
-        return Ok(());
-    }
+    // Determine target language - priority: explicit parameter > default > subscription
+    let target_lang = if let Some(lang) = language {
+        normalize_language(&lang)
+    } else if let Ok(Some(default)) = ctx.data().db.get_default_language(&user_id).await {
+        // Use user's default language
+        default
+    } else {
+        // Fall back to subscriptions
+        let subscriptions = ctx.data().db.get_translation_subscriptions(&guild_id, &user_id, &channel_id).await?;
+        if subscriptions.is_empty() {
+            ctx.say("⚠️ Set a default language with `/fabrica translate default <language>`, or specify one: `/fabrica translate last <count> <language>`").await?;
+            return Ok(());
+        }
 
-    // Use first non-English subscription, or English if that's all they have
-    let target_lang = subscriptions.iter()
-        .find(|l| *l != "en")
-        .unwrap_or_else(|| subscriptions.first().unwrap())
-        .clone();
+        // Use first non-English subscription, or English if that's all they have
+        subscriptions.iter()
+            .find(|l| *l != "en")
+            .unwrap_or_else(|| subscriptions.first().unwrap())
+            .clone()
+    };
+
+    // Check if user has a dialect preference for this language
+    let dialect = ctx.data().db.get_dialect_preference(&user_id, &target_lang).await.ok().flatten();
 
     // Defer the reply since this might take a while
     ctx.defer().await?;
@@ -720,9 +840,14 @@ pub async fn last(ctx: Context<'_>, count: Option<u32>) -> Result<(), Error> {
 
     let translator = TranslatorService::new(&ctx.data().config.translation);
     let target_lang_name = language_name(&target_lang);
+    let target_display = if let Some(ref d) = dialect {
+        format!("{} ({})", target_lang_name, d)
+    } else {
+        target_lang_name.to_string()
+    };
 
     // Build the translated output
-    let mut output = format!("📜 **Last {} messages translated to {}:**\n\n", chronological.len(), target_lang_name);
+    let mut output = format!("📜 **Last {} messages translated to {}:**\n\n", chronological.len(), target_display);
     let mut translations_added = 0;
 
     for msg in &chronological {
@@ -736,27 +861,17 @@ pub async fn last(ctx: Context<'_>, count: Option<u32>) -> Result<(), Error> {
             continue;
         }
 
-        // Detect source language
+        // Detect source language (convert 3-letter whatlang codes to 2-letter ISO codes)
         let detected = whatlang::detect(content);
         let source_lang = detected
-            .map(|info| {
-                let code = info.lang().code();
-                match code {
-                    "eng" => "en",
-                    "hin" => "hi",
-                    "fra" => "fr",
-                    "spa" => "es",
-                    "deu" => "de",
-                    other => other,
-                }
-            })
+            .map(|info| whatlang_to_iso(info.lang().code()))
             .unwrap_or("en");
 
-        // Translate if needed
+        // Translate if needed (with dialect preference)
         let translated_content = if source_lang == target_lang {
             content.to_string()
         } else {
-            match translator.translate(content, source_lang, &target_lang).await {
+            match translator.translate_with_dialect(content, source_lang, &target_lang, dialect.as_deref()).await {
                 Ok(Some(t)) => t,
                 Ok(None) => content.to_string(),
                 Err(_) => content.to_string(),
@@ -875,6 +990,40 @@ fn language_name(code: &str) -> &'static str {
         "pt" => "Portuguese",
         "ko" => "Korean",
         _ => "Unknown",
+    }
+}
+
+/// Convert whatlang 3-letter codes to ISO 639-1 2-letter codes
+fn whatlang_to_iso(code: &str) -> &str {
+    match code {
+        "eng" => "en",
+        "hin" => "hi",
+        "fra" => "fr",
+        "spa" => "es",
+        "deu" => "de",
+        "kor" => "ko",
+        "tgl" => "fil",  // Tagalog -> Filipino
+        "cmn" | "zho" => "zh",
+        "jpn" => "ja",
+        "rus" => "ru",
+        "ara" => "ar",
+        "por" => "pt",
+        "ita" => "it",
+        "nld" => "nl",
+        "pol" => "pl",
+        "tur" => "tr",
+        "vie" => "vi",
+        "tha" => "th",
+        "ind" => "id",
+        "ukr" => "uk",
+        "ces" => "cs",
+        "ell" => "el",
+        "heb" => "he",
+        "swe" => "sv",
+        "dan" => "da",
+        "fin" => "fi",
+        "nor" => "no",
+        other => other,
     }
 }
 

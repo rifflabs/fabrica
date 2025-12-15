@@ -128,38 +128,66 @@ pub async fn team(ctx: Context<'_>, public: bool) -> Result<(), Error> {
     };
 
     let available = ctx.data().db.get_users_by_status("available").await?;
-    let user_id = ctx.author().id.to_string();
-    let user_settings = ctx.data().db.get_user_settings(&user_id).await?;
+    let busy = ctx.data().db.get_users_by_status("busy").await?;
+    let viewer_id = ctx.author().id.to_string();
+    let viewer_settings = ctx.data().db.get_user_settings(&viewer_id).await?;
     let today = Local::now().format("%Y-%m-%d").to_string();
+    let now = chrono::Utc::now().timestamp();
+    let fifteen_minutes = 15 * 60; // seconds
 
-    if available.is_empty() {
-        let msg = "No team members are currently available.";
+    let mut response = String::from("───────────────────────────────\n");
+    let mut shown_count = 0;
+
+    // Available users - always show
+    if !available.is_empty() {
+        response.push_str("🟢 **Available**\n");
+        for status in &available {
+            let member_settings = ctx.data().db.get_user_settings(&status.discord_id).await?;
+            response.push_str(&format_team_member(&status, &member_settings, &viewer_settings, &guild_id, &today, ctx).await);
+            shown_count += 1;
+        }
+        response.push('\n');
+    }
+
+    // Busy users - show if busy < 15 min OR always_show_me
+    let visible_busy: Vec<_> = {
+        let mut result = Vec::new();
+        for status in &busy {
+            let member_settings = ctx.data().db.get_user_settings(&status.discord_id).await?;
+            let busy_duration = now - status.updated_at;
+            if busy_duration < fifteen_minutes || member_settings.always_show_me {
+                result.push((status, member_settings, busy_duration));
+            }
+        }
+        result
+    };
+
+    if !visible_busy.is_empty() {
+        response.push_str("🟡 **Busy**\n");
+        for (status, member_settings, busy_duration) in &visible_busy {
+            let mut line = format_team_member(status, member_settings, &viewer_settings, &guild_id, &today, ctx).await;
+            // Add how long they've been busy
+            let mins = busy_duration / 60;
+            if mins > 0 {
+                line = line.trim_end().to_string();
+                line.push_str(&format!(" ({}m)\n", mins));
+            }
+            response.push_str(&line);
+            shown_count += 1;
+        }
+        response.push('\n');
+    }
+
+    // Away users never shown in /team
+
+    if shown_count == 0 {
+        let msg = "No team members are currently visible.";
         if public {
             ctx.say(msg).await?;
         } else {
             ctx.send(poise::CreateReply::default().content(msg).ephemeral(true)).await?;
         }
         return Ok(());
-    }
-
-    let mut response = String::from("───────────────────────────────\n");
-    response.push_str("🟢 **Available Team Members**\n\n");
-
-    for status in &available {
-        let user_mention = format!("<@{}>", status.discord_id);
-        response.push_str(&format!("  {}", user_mention));
-
-        if let Some(msg) = &status.message {
-            response.push_str(&format!(" - {}", msg));
-        }
-
-        // Check for today's schedule override (until time)
-        if let Ok(Some((_, end_time))) = ctx.data().db.get_schedule_override(&guild_id, &status.discord_id, &today).await {
-            let formatted = format_time_for_user(&end_time, &user_settings);
-            response.push_str(&format!(" (until {})", formatted));
-        }
-
-        response.push('\n');
     }
 
     response.push_str("───────────────────────────────");
@@ -171,6 +199,57 @@ pub async fn team(ctx: Context<'_>, public: bool) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// Format a team member for display, showing their local time
+async fn format_team_member(
+    status: &crate::db::UserStatus,
+    member_settings: &crate::db::UserSettings,
+    viewer_settings: &crate::db::UserSettings,
+    guild_id: &str,
+    today: &str,
+    ctx: Context<'_>,
+) -> String {
+    let user_mention = format!("<@{}>", status.discord_id);
+    let mut line = format!("  {}", user_mention);
+
+    // Show their local time with timezone context
+    if let Ok(member_tz) = member_settings.timezone.parse::<chrono_tz::Tz>() {
+        let local_time = chrono::Utc::now().with_timezone(&member_tz);
+        let time_str = if viewer_settings.is_12h() {
+            local_time.format("%-I:%M%P").to_string()
+        } else {
+            local_time.format("%H:%M").to_string()
+        };
+
+        // Check if viewer is in the same timezone
+        let same_tz = if let Ok(viewer_tz) = viewer_settings.timezone.parse::<chrono_tz::Tz>() {
+            member_tz == viewer_tz
+        } else {
+            false
+        };
+
+        if same_tz {
+            line.push_str(&format!(" 🕐 {}", time_str));
+        } else {
+            // Show timezone abbreviation for different timezones
+            let tz_abbr = local_time.format("%Z").to_string();
+            line.push_str(&format!(" 🕐 {} {}", time_str, tz_abbr));
+        }
+    }
+
+    if let Some(msg) = &status.message {
+        line.push_str(&format!(" - {}", msg));
+    }
+
+    // Check for today's schedule override (until time)
+    if let Ok(Some((_, end_time))) = ctx.data().db.get_schedule_override(guild_id, &status.discord_id, today).await {
+        let formatted = format_time_for_user(&end_time, viewer_settings);
+        line.push_str(&format!(" (until {})", formatted));
+    }
+
+    line.push('\n');
+    line
 }
 
 /// Format a time string for display to a user based on their settings
@@ -202,18 +281,41 @@ pub async fn show_settings(ctx: Context<'_>) -> Result<(), Error> {
     let settings = ctx.data().db.get_user_settings(&user_id).await?;
 
     let format_display = if settings.is_12h() { "12-hour (am/pm)" } else { "24-hour" };
+    let always_show_display = if settings.always_show_me { "Yes" } else { "No" };
 
     let response = format!(
         "⚙️ **Your Settings**\n\n\
          **Timezone:** {}\n\
-         **Time format:** {}\n\n\
+         **Time format:** {}\n\
+         **Always show me:** {}\n\n\
          Use `/fabrica settings timezone <zone>` to change timezone\n\
-         Use `/fabrica settings format 24h` or `/fabrica settings format 12h` to change format",
+         Use `/fabrica settings format 24h` or `/fabrica settings format 12h` to change format\n\
+         Use `/fabrica settings always-show-me` to toggle visibility in /team",
         settings.timezone,
-        format_display
+        format_display,
+        always_show_display
     );
 
     ctx.send(poise::CreateReply::default().content(response).ephemeral(true)).await?;
+    Ok(())
+}
+
+/// Toggle always-show-me setting
+pub async fn toggle_always_show_me(ctx: Context<'_>) -> Result<(), Error> {
+    let user_id = ctx.author().id.to_string();
+    let settings = ctx.data().db.get_user_settings(&user_id).await?;
+    let new_value = !settings.always_show_me;
+
+    ctx.data().db.set_user_always_show_me(&user_id, new_value).await?;
+
+    let msg = if new_value {
+        "✅ **Always show me** is now **ON**.\nYou'll appear in `/team` even when busy for a long time or away."
+    } else {
+        "✅ **Always show me** is now **OFF**.\nYou'll be hidden from `/team` when busy for more than 15 minutes or away."
+    };
+
+    info!("User {} set always_show_me to {}", user_id, new_value);
+    ctx.send(poise::CreateReply::default().content(msg).ephemeral(true)).await?;
     Ok(())
 }
 

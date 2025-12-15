@@ -54,8 +54,14 @@ impl TranslatorService {
     /// Translate text from one language to another
     /// Returns None if text is already in the target language (no translation needed)
     pub async fn translate(&self, text: &str, from: &str, to: &str) -> Result<Option<String>> {
+        self.translate_with_dialect(text, from, to, None).await
+    }
+
+    /// Translate text from one language to another with optional dialect
+    /// Returns None if text is already in the target language (no translation needed)
+    pub async fn translate_with_dialect(&self, text: &str, from: &str, to: &str, dialect: Option<&str>) -> Result<Option<String>> {
         match self.config.backend.as_str() {
-            "openrouter" => self.translate_via_openrouter(text, from, to).await,
+            "openrouter" => self.translate_via_openrouter_with_dialect(text, from, to, dialect).await,
             "direct" => self.translate_direct(text, from, to).await,
             other => {
                 warn!("Unknown translation backend: {}, falling back to direct", other);
@@ -64,9 +70,9 @@ impl TranslatorService {
         }
     }
 
-    /// Translate using OpenRouter API
+    /// Translate using OpenRouter API with optional dialect support
     /// Returns None if text is already in the target language
-    async fn translate_via_openrouter(&self, text: &str, from: &str, to: &str) -> Result<Option<String>> {
+    async fn translate_via_openrouter_with_dialect(&self, text: &str, from: &str, to: &str, dialect: Option<&str>) -> Result<Option<String>> {
         let from_name = language_name(from);
         let to_name = language_name(to);
 
@@ -82,18 +88,33 @@ impl TranslatorService {
             _ => "Use the standard script for this language.",
         };
 
+        // Build dialect instruction if specified
+        let dialect_info = if let Some(d) = dialect {
+            format!("\nDIALECT: Use the {} dialect/variety of {}. Use vocabulary, expressions, and phrasing natural to {} speakers.\n", d, to_name, d)
+        } else {
+            String::new()
+        };
+
+        let target_desc = if let Some(d) = dialect {
+            format!("{} ({})", to_name, d)
+        } else {
+            to_name.to_string()
+        };
+
         let prompt = format!(
             "You are a professional translator. Translate the following text from {} to {}.\n\n\
-             SCRIPT INFORMATION: {}\n\n\
+             SCRIPT INFORMATION: {}{}\n\n\
              STRICT RULES:\n\
              - Provide an ACCURATE, LITERAL translation\n\
              - Use the CORRECT script/alphabet as specified above\n\
              - Do NOT be creative, funny, or add interpretations\n\
              - For slang/internet terms (like 'LOL'), translate to the natural equivalent in {}\n\
              - If the text is ALREADY in {}, respond with EXACTLY: NO_TRANSLATION_NEEDED\n\
-             - Output ONLY the translation - no explanations, notes, or extra text\n\n\
+             - For untranslatable text (onomatopoeia like 'hmm', '...', sounds), output the original unchanged\n\
+             - Output ONLY the translation - no explanations, notes, commentary, or extra text\n\
+             - NEVER prefix with 'Translation:' or similar - just output the translated text directly\n\n\
              Text to translate:\n{}",
-            from_name, to_name, script_info, to_name, to_name, text
+            from_name, target_desc, script_info, dialect_info, to_name, to_name, text
         );
 
         #[derive(Serialize)]

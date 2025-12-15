@@ -200,6 +200,22 @@ CREATE TABLE IF NOT EXISTS user_settings (
 );
 "#;
 
+/// Migration to add always_show_me column to user_settings
+pub const MIGRATION_ADD_ALWAYS_SHOW_ME: &str = r#"
+ALTER TABLE user_settings ADD COLUMN always_show_me INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// Migration to add user dialect preferences table
+pub const MIGRATION_ADD_DIALECT_PREFERENCES: &str = r#"
+CREATE TABLE IF NOT EXISTS user_dialect_preferences (
+    discord_id TEXT NOT NULL,
+    language TEXT NOT NULL,
+    dialect TEXT NOT NULL,
+    PRIMARY KEY (discord_id, language)
+);
+CREATE INDEX IF NOT EXISTS idx_dialect_prefs_user ON user_dialect_preferences(discord_id);
+"#;
+
 /// Migration to fix user_schedule_override table to include guild_id
 pub const MIGRATION_FIX_USER_SCHEDULE_OVERRIDE_PK: &str = r#"
 CREATE TABLE IF NOT EXISTS user_schedule_override_new (
@@ -215,4 +231,9 @@ INSERT OR IGNORE INTO user_schedule_override_new (guild_id, discord_id, date, st
     FROM user_schedule_override;
 DROP TABLE user_schedule_override;
 ALTER TABLE user_schedule_override_new RENAME TO user_schedule_override;
+"#;
+
+/// Migration to add default_language column to user_settings
+pub const MIGRATION_ADD_DEFAULT_LANGUAGE: &str = r#"
+ALTER TABLE user_settings ADD COLUMN default_language TEXT;
 "#;

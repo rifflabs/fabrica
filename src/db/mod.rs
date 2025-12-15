@@ -55,6 +55,15 @@ impl Database {
                 // Add user settings table
                 let _ = conn.execute_batch(schema::MIGRATION_ADD_USER_SETTINGS);
 
+                // Add always_show_me column to user_settings
+                let _ = conn.execute_batch(schema::MIGRATION_ADD_ALWAYS_SHOW_ME);
+
+                // Add dialect preferences table
+                let _ = conn.execute_batch(schema::MIGRATION_ADD_DIALECT_PREFERENCES);
+
+                // Add default language to user_settings
+                let _ = conn.execute_batch(schema::MIGRATION_ADD_DEFAULT_LANGUAGE);
+
                 Ok(())
             })
             .await?;
@@ -299,7 +308,7 @@ impl Database {
         self.conn
             .call(move |conn| {
                 let mut stmt = conn.prepare(
-                    "SELECT discord_id, timezone, time_format FROM user_settings WHERE discord_id = ?",
+                    "SELECT discord_id, timezone, time_format, COALESCE(always_show_me, 0) FROM user_settings WHERE discord_id = ?",
                 )?;
                 let result = stmt
                     .query_row([&id], |row| {
@@ -307,6 +316,7 @@ impl Database {
                             discord_id: row.get(0)?,
                             timezone: row.get(1)?,
                             time_format: row.get(2)?,
+                            always_show_me: row.get::<_, i32>(3)? != 0,
                         })
                     })
                     .optional()?;
@@ -350,6 +360,138 @@ impl Database {
             })
             .await?;
         Ok(())
+    }
+
+    /// Set user always_show_me preference
+    pub async fn set_user_always_show_me(&self, discord_id: &str, always_show: bool) -> Result<()> {
+        let id = discord_id.to_string();
+        let val = if always_show { 1 } else { 0 };
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO user_settings (discord_id, timezone, time_format, always_show_me)
+                     VALUES (?, 'UTC', '24h', ?)
+                     ON CONFLICT(discord_id) DO UPDATE SET always_show_me = excluded.always_show_me",
+                    rusqlite::params![id, val],
+                )?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
+    // ==================== Dialect Preferences ====================
+
+    /// Set user's preferred dialect for a language
+    pub async fn set_dialect_preference(&self, discord_id: &str, language: &str, dialect: &str) -> Result<()> {
+        let id = discord_id.to_string();
+        let lang = language.to_lowercase();
+        let dial = dialect.to_string();
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO user_dialect_preferences (discord_id, language, dialect)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(discord_id, language) DO UPDATE SET dialect = excluded.dialect",
+                    rusqlite::params![id, lang, dial],
+                )?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Get user's preferred dialect for a language (returns None if not set)
+    pub async fn get_dialect_preference(&self, discord_id: &str, language: &str) -> Result<Option<String>> {
+        let id = discord_id.to_string();
+        let lang = language.to_lowercase();
+        self.conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT dialect FROM user_dialect_preferences WHERE discord_id = ? AND language = ?",
+                )?;
+                let result = stmt
+                    .query_row(rusqlite::params![id, lang], |row| row.get(0))
+                    .optional()?;
+                Ok(result)
+            })
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get all dialect preferences for a user
+    pub async fn get_all_dialect_preferences(&self, discord_id: &str) -> Result<Vec<(String, String)>> {
+        let id = discord_id.to_string();
+        self.conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT language, dialect FROM user_dialect_preferences WHERE discord_id = ?",
+                )?;
+                let rows = stmt.query_map([&id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?;
+                let mut results = Vec::new();
+                for row in rows {
+                    results.push(row?);
+                }
+                Ok(results)
+            })
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Clear a user's dialect preference for a language
+    pub async fn clear_dialect_preference(&self, discord_id: &str, language: &str) -> Result<()> {
+        let id = discord_id.to_string();
+        let lang = language.to_lowercase();
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "DELETE FROM user_dialect_preferences WHERE discord_id = ? AND language = ?",
+                    rusqlite::params![id, lang],
+                )?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
+    // ==================== Default Language ====================
+
+    /// Set user's default translation language
+    pub async fn set_default_language(&self, discord_id: &str, language: &str) -> Result<()> {
+        let id = discord_id.to_string();
+        let lang = language.to_lowercase();
+        self.conn
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO user_settings (discord_id, default_language)
+                     VALUES (?, ?)
+                     ON CONFLICT(discord_id) DO UPDATE SET default_language = excluded.default_language",
+                    rusqlite::params![id, lang],
+                )?;
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Get user's default translation language (returns None if not set)
+    pub async fn get_default_language(&self, discord_id: &str) -> Result<Option<String>> {
+        let id = discord_id.to_string();
+        self.conn
+            .call(move |conn| {
+                let mut stmt = conn.prepare(
+                    "SELECT default_language FROM user_settings WHERE discord_id = ?",
+                )?;
+                let result: Option<Option<String>> = stmt
+                    .query_row([&id], |row| row.get(0))
+                    .optional()?;
+                // Handle NULL column vs missing row
+                Ok(result.flatten())
+            })
+            .await
+            .map_err(Into::into)
     }
 
     // ==================== Translation ====================
