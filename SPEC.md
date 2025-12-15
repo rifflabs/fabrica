@@ -434,7 +434,7 @@ path = "fabrica.db"
 backend = "openrouter"  # "palace", "openrouter", or "direct"
 openrouter_url = "https://openrouter.ai/api/v1"
 openrouter_api_key = "${OPENROUTER_API_KEY}"
-model = "mistral"  # Model to use for translation
+model = "mistralai/mistral-large-2512"  # Model to use for translation
 default_language = "en"
 supported_languages = ["en", "hi", "fr"]  # English, Hindi, French
 
