@@ -4,31 +4,36 @@
 [discord]
 # Get from https://discord.com/developers/applications
 token = "${DISCORD_TOKEN}"
-application_id = 0  # Your bot's application ID
-guild_id = 0        # Optional: Riff Labs server ID for faster command registration
+application_id = 123456789012345678  # Your bot's application ID
+
+# Servers where the bot is allowed to operate (required)
+guild_ids = ["123456789012345678", "234567890123456789"]
+
+# User IDs who bypass all permission checks (optional)
+admin_ids = ["123456789012345678"]
 
 [database]
 path = "fabrica.db"
 
 [translation]
-backend = "openrouter"  # "palace", "openrouter", or "direct"
+backend = "openrouter"  # "palace" or "openrouter"
 openrouter_url = "https://openrouter.ai/api/v1"
 openrouter_api_key = "${OPENROUTER_API_KEY}"
-model = "mistralai/mistral-large-2512"   # Model to use for translation
+model = "mistralai/mistral-large-2512"  # Model for translation
 default_language = "en"
-supported_languages = ["en", "hi", "fr"]
+supported_languages = ["en", "hi", "fr", "es", "de", "ja", "zh"]
 
 [plane]
-url = "https://plane.riff.cc"
+url = "https://plane.example.com"
 api_key = "${PLANE_API_KEY}"
-workspace = "riff"
+workspace = "my-workspace"
 
 [github]
 token = "${GITHUB_TOKEN}"
 webhook_secret = "${GITHUB_WEBHOOK_SECRET}"
-org = "riffcc"
+org = "my-org"
 
 [webhooks]
 host = "0.0.0.0"
 port = 8080
-base_url = "https://fabrica.riff.cc"  # Public URL for webhook callbacks
+base_url = "https://fabrica.example.com"  # Public URL for webhook callbacks
