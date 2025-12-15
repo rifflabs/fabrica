@@ -35,6 +35,7 @@ cargo build --release
 # Configure
 cp fabrica.example.toml fabrica.toml
 # Edit fabrica.toml with your tokens
+# or use .env
 
 # Run (with OpenRouter API key)
 export OPENROUTER_API_KEY="your-openrouter-key"
