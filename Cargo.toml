@@ -1,0 +1,69 @@
+[package]
+name = "fabrica"
+version = "0.1.0"
+edition = "2021"
+description = "Palace Fabrica - Coordination infrastructure for Riff Labs"
+license = "AGPL-3.0-or-later"
+authors = ["Riff Labs <hello@riff.cc>"]
+repository = "https://github.com/riffcc/fabrica"
+
+[dependencies]
+# Discord
+poise = "0.6"
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "rustls_backend", "cache"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client & server
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+axum = { version = "0.7", features = ["macros"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+tokio-rusqlite = "0.5"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.9"
+
+# GitHub
+octocrab = "0.38"
+
+# Crypto for webhook verification
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
+# Language detection
+whatlang = "0.16"
+
+# Environment
+dotenvy = "0.15"
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1"
+
+[[bin]]
+name = "fabrica"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

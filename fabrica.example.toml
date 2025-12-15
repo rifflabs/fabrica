@@ -1,0 +1,33 @@
+# Palace Fabrica Configuration
+# Copy to fabrica.toml and fill in your values
+
+[discord]
+# Get from https://discord.com/developers/applications
+token = "${DISCORD_TOKEN}"
+application_id = 0  # Your bot's application ID
+guild_id = 0        # Optional: Riff Labs server ID for faster command registration
+
+[database]
+path = "fabrica.db"
+
+[translation]
+backend = "palace"  # "palace" for LLM-based, "direct" for API-based
+palace_url = "http://localhost:19848"  # Palace Translator URL
+model = "mistral"   # Model to use for translation
+default_language = "en"
+supported_languages = ["en", "hi", "fr"]
+
+[plane]
+url = "https://plane.riff.cc"
+api_key = "${PLANE_API_KEY}"
+workspace = "riff"
+
+[github]
+token = "${GITHUB_TOKEN}"
+webhook_secret = "${GITHUB_WEBHOOK_SECRET}"
+org = "riffcc"
+
+[webhooks]
+host = "0.0.0.0"
+port = 8080
+base_url = "https://fabrica.riff.cc"  # Public URL for webhook callbacks
